@@ -1,0 +1,56 @@
+pipeline {
+    agent any
+
+    environment {
+        GIT_SSH_COMMAND = "ssh -o StrictHostKeyChecking=no"
+    }
+
+    parameters {
+        choice(name: 'checking', choices: ['yes', 'no'], description: 'Do you want to execute complete code or particular one?')
+        choice(name: 'action', choices: ['apply', 'destroy'], description: 'Select action (apply/destroy)')
+        choice(name: 'target_resources', choices: ['aws_lambda_function.test_lambda', 'aws_instance.my_instance'], description: 'Select particular resource')
+        choice(name: 'create_instance', choices: ['true', 'false'], description: 'Create instance (true/false)')
+        choice(name: 'create_dump_db', choices: ['true', 'false'], description: 'Create dump file (true/false)')
+        choice(name: 'backup_db_dump_into_prod_db', choices: ['true', 'false'], description: 'Backup dump into prod database (true/false)')
+    }
+
+    stages {
+        stage('git access test') {
+            steps {
+                git branch: 'jenkins', credentialsId: 'git', url: 'git@github.com:giturl'
+            }
+        }
+        stage('terraform init test') {
+            steps {
+                sh 'terraform init'
+            }
+        }
+        stage('terraform plan') {
+            when {
+                expression { params.action == 'apply' }
+            }
+            steps {
+                sh "terraform plan -var='create_instance=${params.create_instance}' -var='create_dump_db=${params.create_dump_db}' -var='backup_db_dump_into_prod_db=${params.backup_db_dump_into_prod_db}' -out=tfplan"
+            }
+        }
+        stage('Check and Execute Terraform Action') {
+            steps {
+                script {
+                    if (params.checking == 'yes') {
+                        if (params.action == 'apply') {
+                            sh "terraform apply -auto-approve tfplan"
+                        } else if (params.action == 'destroy') {
+                            sh "terraform destroy -auto-approve"
+                        } else {
+                            echo "Invalid action specified"
+                        }
+                    } else if (params.checking == 'no' && params.action == 'apply') {
+                        sh "terraform apply -target='${params.target_resources} -auto-approve'"
+                    } else {
+                        echo "Invalid choice for 'checking' parameter or action is 'destroy'"
+                    }
+                }
+            }
+        }
+    }
+}
